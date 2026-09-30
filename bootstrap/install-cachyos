@@ -59,32 +59,49 @@ takeover_arguments=()
 [[ "$assume_yes" == true ]] && takeover_arguments+=(--yes)
 "$repo_dir/bootstrap/takeover" "${takeover_arguments[@]}"
 
+# From here on the configuration is deployed; a failed build must not hide the
+# final instructions, so failures are collected instead of aborting.
+failed=()
+attempt() {
+    local label="$1"
+    shift
+    if ! "$@"; then
+        failed+=("$label")
+        printf 'warning: %s failed; rerun it later with: %s\n' "$label" "$*" >&2
+    fi
+}
+
 if [[ "$skip_plugins" == false ]]; then
     step "Building the pinned Hyprland plugins against the installed Hyprland"
-    "$repo_dir/bin/install-hyprglass"
-    "$repo_dir/bin/install-scrolloverview"
-    "$repo_dir/bin/install-hyprwindowshade"
-    "$repo_dir/bin/install-dynamic-cursors"
+    attempt "Hyprglass" "$repo_dir/bin/install-hyprglass"
+    attempt "ScrollOverview" "$repo_dir/bin/install-scrolloverview"
+    attempt "HyprWindowShade" "$repo_dir/bin/install-hyprwindowshade"
+    attempt "Dynamic Cursors" "$repo_dir/bin/install-dynamic-cursors"
     step "Installing the Oblique cursor theme"
-    "$repo_dir/bin/install-oblique-cursor"
+    attempt "Oblique cursor" "$repo_dir/bin/install-oblique-cursor"
 fi
 
 if [[ "$skip_wallpaper" == false ]]; then
     step "Installing the Orbit Wallpaper Engine integration"
-    ORBIT_WALLPAPER_REPO_URL="${ORBIT_WALLPAPER_REPO_URL:-https://github.com/CleanShirtUK/orbit-wallpaper-engine.git}" \
-        "$repo_dir/bin/dotfiles-install-wallpaper" ||
-        printf 'warning: Wallpaper Engine integration failed; rerun bin/dotfiles-install-wallpaper later\n' >&2
+    attempt "Wallpaper Engine" "$repo_dir/bin/dotfiles-install-wallpaper"
 fi
 
 step "Verifying"
-"$repo_dir/bootstrap/verify"
+attempt "verify" "$repo_dir/bootstrap/verify"
+
+if (( ${#failed[@]} > 0 )); then
+    printf '\nSteps that need attention: %s\n' "${failed[*]}"
+fi
 
 cat <<'EOF'
 
-Orbit is deployed. Next:
-  1. Log out and pick the "Hyprland" session (not the UWSM one) in SDDM.
-  2. Run `nwg-displays` once to write ~/.config/hypr/monitors.lua.
+Orbit is deployed. The running session still shows the old shell; to see Orbit:
+  1. Log out NOW (SUPER+ALT+C -> Log out, or `hyprctl dispatch exit`) and pick
+     the "Hyprland" session in SDDM (not the UWSM one).
+  2. After logging in, run `nwg-displays` once to write ~/.config/hypr/monitors.lua.
   3. Optional: bin/install-plymouth-theme, bin/configure-zen, bin/configure-obsidian,
      bin/install-actions-for-nautilus, bin/configure-localsend-firewall.
 Keybinds: docs/keybinds.md
 EOF
+
+(( ${#failed[@]} == 0 ))

@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Report the state of an Orbit deployment on this machine in one screen.
+# Read-only; safe to run at any time, inside or outside a Hyprland session.
+
+repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+home_dir=${HOME:?HOME is required}
+config_dir=${XDG_CONFIG_HOME:-$home_dir/.config}
+
+ok()   { printf '  [ok]   %s\n' "$*"; }
+bad()  { printf '  [!!]   %s\n' "$*"; }
+info() { printf '  [..]   %s\n' "$*"; }
+
+link_state() {
+    local path="$1" label="$2"
+    if [[ -L "$path" && "$(readlink -f "$path")" == "$repo_dir"/* ]]; then
+        ok "$label is Orbit's"
+    elif [[ -e "$path" ]]; then
+        bad "$label is NOT Orbit's ($(readlink -f "$path"))"
+    else
+        bad "$label is missing"
+    fi
+}
+
+printf 'Deployment\n'
+link_state "$config_dir/hypr/hyprland.lua" "hyprland.lua"
+link_state "$config_dir/noctalia/50-orbit-shell.toml" "Noctalia shell drop-in"
+link_state "$home_dir/.local/bin/orbit-session-bootstrap" "orbit-session-bootstrap"
+for foreign in hyprland.conf config hyprland custom; do
+    [[ -e "$config_dir/hypr/$foreign" ]] && bad "foreign $config_dir/hypr/$foreign still present"
+done
+if [[ -e "${XDG_STATE_HOME:-$home_dir/.local/state}/noctalia/settings.toml" ]]; then
+    info "Noctalia GUI overrides exist (settings.toml) and win over the tracked layout"
+fi
+for other in "$config_dir"/noctalia/*.toml; do
+    [[ -L "$other" && "$(readlink -f "$other")" == "$repo_dir"/* ]] || bad "foreign Noctalia drop-in: $other"
+done
+
+printf 'Plugins and themes\n'
+for plugin in hyprglass.so libscrolloverview.so HyprWindowShade.so dynamic-cursors.so; do
+    if [[ -f "$home_dir/.local/share/hyprland/plugins/$plugin" ]]; then ok "$plugin built"; else bad "$plugin missing (bin/install-*)"; fi
+done
+if [[ -f "$home_dir/.local/share/icons/oblique-cursor/manifest.hl" ]]; then ok "oblique-cursor theme"; else bad "oblique-cursor theme missing (bin/install-oblique-cursor)"; fi
+if [[ -x "$home_dir/.local/bin/orbit-wallpaper-settings" ]]; then ok "Wallpaper Engine integration"; else bad "Wallpaper Engine integration missing (bin/dotfiles-install-wallpaper)"; fi
+
+printf 'Session\n'
+if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] && command -v hyprctl >/dev/null 2>&1; then
+    if hyprctl -j getoption general:layout 2>/dev/null | grep -q '"master"'; then
+        ok "running Hyprland has Orbit's configuration loaded"
+    else
+        bad "running Hyprland still has the previous configuration; log out and back in"
+    fi
+    # configerrors prints `[ "" ]` when there is nothing to report.
+    errors=$(hyprctl -j configerrors 2>/dev/null | tr -d '[]" \n\t')
+    if [[ -n "$errors" ]]; then
+        bad "Hyprland reports config errors:"
+        hyprctl configerrors 2>/dev/null | sed '/^\s*$/d; s/^/         /'
+    fi
+    if hyprctl -j plugins 2>/dev/null | grep -q '"name"'; then ok "plugins loaded in this session"; else info "no plugins loaded in this session (expected until relogin)"; fi
+    for unit in hyprland-session.target orbit-wallpaper-engine.service hypridle.service hyprpolkitagent.service; do
+        if systemctl --user is-active --quiet "$unit"; then ok "$unit active"; else info "$unit not active"; fi
+    done
+    if pgrep -x noctalia >/dev/null; then ok "Noctalia running"; else bad "Noctalia not running"; fi
+    if pgrep -f 'quickshell --config global-menu' >/dev/null; then ok "global menu running"; else info "global menu not running (starts with the Orbit session)"; fi
+    printf '  session: %s (XDG_CURRENT_DESKTOP=%s)\n' "${XDG_SESSION_DESKTOP:-?}" "${XDG_CURRENT_DESKTOP:-?}"
+else
+    info "not inside a Hyprland session"
+fi
+id -nG | tr ' ' '\n' | grep -qx input && ok "user is in the input group" || bad "user is not in the input group yet (relogin after install-packages)"

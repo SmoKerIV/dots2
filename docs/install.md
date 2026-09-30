@@ -55,7 +55,12 @@ Takeover moves every conflicting file into
 `~/.local/state/orbit/takeover/<timestamp>/`, writes a manifest, and runs
 `bootstrap/deploy`. Nothing is deleted. It also sets aside foreign Hyprland
 modules (`hypr/config`, `hypr/custom`, `hyprland.conf`, …) and other Noctalia
-drop-ins that would otherwise load next to Orbit's files. Undo with:
+drop-ins that would otherwise load next to Orbit's files. When run inside a
+live Hyprland session it reloads Hyprland and asks Noctalia to re-read its
+configuration, but the shell, lock screen, plugins, and wallpaper only start
+with a fresh session: **log out right after and choose the "Hyprland"
+session**. `./bootstrap/status` shows what is deployed and whether the running
+session has picked it up. Undo with:
 
 ```sh
 ./bootstrap/takeover --restore ~/.local/state/orbit/takeover/<timestamp>
@@ -138,6 +143,7 @@ optional; the greeter background sync only runs when `greetd` is enabled.
 ## 5. Verify And Start Using Orbit
 
 ```sh
+./bootstrap/status
 ./bootstrap/verify
 ./tests/orbit/run-all
 ```

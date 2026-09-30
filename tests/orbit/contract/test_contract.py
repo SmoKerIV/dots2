@@ -333,10 +333,13 @@ class CachyOSPortTests(unittest.TestCase):
                 self.assertNotIn(b"dnf install", path.read_bytes(), path)
 
     def test_bootstrap_scripts_for_cachyos(self):
-        for name in ("takeover", "install-packages", "install-cachyos", "deploy", "verify"):
+        for name in ("takeover", "install-packages", "install-cachyos", "deploy", "verify", "status"):
             path = REPO / "bootstrap" / name
             self.assertTrue(os.access(path, os.X_OK), path)
             subprocess.run(["bash", "-n", str(path)], check=True, capture_output=True, text=True)
+        takeover = (REPO / "bootstrap/takeover").read_text()
+        self.assertIn("noctalia msg config-reload", takeover)
+        self.assertIn("hyprctl reload", takeover)
         packages = (REPO / "bootstrap/install-packages").read_text()
         for package in ("hyprland", "hyprpm", "noctalia", "quickshell", "nwg-displays", "python-evdev", "ttf-jetbrains-mono", "hyprqt6engine"):
             self.assertIn(package, packages)

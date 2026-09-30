@@ -12,8 +12,9 @@ below explain what a fresh deployment creates and what remains local.
 - `bin/`, `lib/`, `systemd/user/`, `desktop/`, `plymouth/`, and `assets/`
   contain Orbit scripts, services, launchers, the boot theme, and sound assets.
 - `bootstrap/install-packages`, `bootstrap/takeover`, `bootstrap/deploy`,
-  `bootstrap/verify`, `bootstrap/migrate`, and `bootstrap/install-cachyos`
-  contain package installation, replacement/backup, deployment, validation,
+  `bootstrap/verify`, `bootstrap/status`, `bootstrap/migrate`, and
+  `bootstrap/install-cachyos` contain package installation,
+  replacement/backup, deployment, validation, a read-only state report,
   adoption/rollback, and the one-shot CachyOS flow.
 
 ## Deployed Links And Seeds

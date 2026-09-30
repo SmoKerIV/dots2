@@ -261,6 +261,24 @@ deploy_arguments=()
 [[ "$optional" == true ]] && deploy_arguments+=(--optional)
 "$repo_dir/bootstrap/deploy" "${deploy_arguments[@]}"
 
+# The files changed underneath a live session. Hyprland's config watcher still
+# follows the old file (now in the backup) and Noctalia keeps the moved GUI
+# overrides in memory and would write them back, so refresh both now.
+if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] && command -v hyprctl >/dev/null 2>&1; then
+    if command -v noctalia >/dev/null 2>&1 && noctalia msg config-reload >/dev/null 2>&1; then
+        log "asked the running Noctalia to reload its configuration"
+    fi
+    if hyprctl reload >/dev/null 2>&1; then
+        log "reloaded the running Hyprland configuration"
+    fi
+    cat <<'EOF'
+
+Orbit's Hyprland configuration is now live in this session, but the shell,
+lock screen, plugins, and wallpaper only start with a fresh session:
+  log out now (SUPER+ALT+C -> Log out) and choose the "Hyprland" session.
+EOF
+fi
+
 if (( ${#conflicts[@]} > 0 )); then
     printf '\nUndo with:\n  %s --restore %s\n' "$0" "$backup"
 fi

@@ -231,8 +231,9 @@ if [[ "$dry_run" == true ]]; then
 fi
 
 if [[ "$assume_yes" != true && ${#conflicts[@]} -gt 0 ]]; then
-    read -r -p 'Continue? [y/N] ' answer
-    [[ "$answer" == [yY]* ]] || { printf 'aborted\n'; exit 1; }
+    printf 'They are moved to a backup, not deleted, and can be restored with --restore.\n'
+    read -r -p 'Type y to continue (anything else aborts without changing files): ' answer
+    [[ "$answer" == [yY]* ]] || { printf 'aborted: nothing was changed\n'; exit 1; }
 fi
 
 timestamp=$(date -u +%Y%m%dT%H%M%SZ)

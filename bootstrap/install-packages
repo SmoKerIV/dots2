@@ -87,11 +87,31 @@ if (( ${#pacman_targets[@]} > 0 )); then
     if (( ${#pacman_missing[@]} > 0 )); then
         printf 'pacman: %s\n' "${pacman_missing[*]}"
         if [[ "$dry_run" == false ]]; then
-            sudo pacman -S --needed "${pacman_missing[@]}"
+            # A fresh install carries the ISO's package database; refresh it and
+            # do the full upgrade in the same transaction (never a partial one),
+            # otherwise recent split packages such as hyprpm are "not found".
+            sudo pacman -Sy
+            unknown=()
+            for package in "${pacman_missing[@]}"; do
+                pacman -Si "$package" >/dev/null 2>&1 || unknown+=("$package")
+            done
+            if (( ${#unknown[@]} > 0 )); then
+                printf 'error: not in any enabled repository: %s\n' "${unknown[*]}" >&2
+                printf 'Check /etc/pacman.conf ([extra] and the cachyos repositories must be enabled) and rerun.\n' >&2
+                exit 1
+            fi
+            sudo pacman -Su --needed "${pacman_missing[@]}"
         fi
     else
         printf 'pacman: all requested packages are installed\n'
     fi
+fi
+
+if [[ "$dry_run" == false ]] && ! id -nG "$USER" | tr ' ' '\n' | grep -qx input; then
+    # orbit-input-state reads evdev devices through `sg input`; membership takes
+    # effect at the next login.
+    printf 'Adding %s to the input group (needed by workspace-alt-tab-input.service)\n' "$USER"
+    sudo usermod -aG input "$USER"
 fi
 
 if (( ${#aur_targets[@]} > 0 )); then
@@ -111,11 +131,4 @@ if (( ${#aur_targets[@]} > 0 )); then
     else
         printf 'aur: all requested packages are installed\n'
     fi
-fi
-
-if [[ "$dry_run" == false ]] && ! id -nG "$USER" | tr ' ' '\n' | grep -qx input; then
-    # orbit-input-state reads evdev devices through `sg input`; membership takes
-    # effect at the next login.
-    printf 'Adding %s to the input group (needed by workspace-alt-tab-input.service)\n' "$USER"
-    sudo usermod -aG input "$USER"
 fi

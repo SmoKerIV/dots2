@@ -36,6 +36,23 @@ done
 
 step() { printf '\n==> %s\n' "$*"; }
 
+# Deploy creates symlinks that point into this checkout, so it must live
+# somewhere permanent. A ZIP unpacked into Downloads is the usual mistake.
+case "$repo_dir" in
+    "${HOME}/Downloads"/*|/tmp/*|/var/tmp/*|"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"/*)
+        cat >&2 <<EOF
+This checkout is in a temporary location: $repo_dir
+Orbit is deployed as symlinks into it, so move it somewhere permanent first:
+  mv "$repo_dir" ~/orbit-dotfiles && cd ~/orbit-dotfiles && ./bootstrap/install-cachyos $*
+(or clone it: git clone https://github.com/SmoKerIV/dots2.git ~/orbit-dotfiles)
+EOF
+        exit 1
+        ;;
+esac
+if [[ ! -d "$repo_dir/.git" ]]; then
+    printf 'note: %s is not a git checkout; you will not be able to `git pull` updates.\n' "$repo_dir" >&2
+fi
+
 if [[ -r /etc/os-release ]]; then
     # shellcheck disable=SC1091
     . /etc/os-release
@@ -47,9 +64,13 @@ fi
 
 if [[ "$skip_packages" == false ]]; then
     step "Installing packages"
-    package_groups=(--core --build --aur)
+    package_groups=(--core --build)
     [[ "$optional" == true ]] && package_groups+=(--optional)
     "$repo_dir/bootstrap/install-packages" "${package_groups[@]}"
+    # AUR builds can fail for reasons unrelated to Orbit; they only affect the
+    # Qt theme provider and icon theme, so do not let them block the takeover.
+    "$repo_dir/bootstrap/install-packages" --aur ||
+        printf 'warning: AUR packages failed; rerun later with: %s --aur\n' "$repo_dir/bootstrap/install-packages" >&2
 fi
 
 step "Replacing the existing Hyprland/Noctalia configuration with Orbit"

@@ -8,6 +8,13 @@ BACKGROUND_FILE="${HOME:?}/.cache/orbit-wallpaper-engine/hyprlock-background.con
 LIVE_SYNC="/var/lib/noctalia-greeter/sync.toml"
 APPLY="/usr/bin/noctalia-greeter-apply-appearance"
 
+# Only sync when Noctalia Greeter is actually the login screen (greetd enabled).
+# With SDDM or another display manager this must stay silent: a pkexec prompt on
+# every palette change would be wrong.
+[ -x "$APPLY" ] || exit 0
+systemctl is-enabled --quiet greetd.service 2>/dev/null || exit 0
+[ -r "$BACKGROUND_FILE" ] || exit 0
+
 color=$(
     sed -n 's/^[[:space:]]*color[[:space:]]*=[[:space:]]*rgb(\([0-9A-Fa-f]\{6\}\))[[:space:]]*$/\1/p' "$BACKGROUND_FILE" \
         | sed -n '1p'

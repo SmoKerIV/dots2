@@ -1,11 +1,88 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Orbit deployment: refusal-oriented, idempotent symlinks and copy-once seeds.
+#
+# usage: deploy [--optional] [--no-services] [--list]
+#   --optional     also enable the optional game-session and LocalSend units
+#   --no-services  create links/seeds only; skip systemctl and Noctalia steps
+#   --list         print the deployment plan (kind, source, destination) and exit
+
 repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 home_dir=${HOME:?HOME is required}
 optional=false
-[[ "${1:-}" == "--optional" ]] && optional=true
-[[ $# -le 1 ]] || { printf 'usage: %s [--optional]\n' "$0" >&2; exit 2; }
+services=true
+list_only=false
+for argument in "$@"; do
+    case "$argument" in
+        --optional) optional=true ;;
+        --no-services) services=false ;;
+        --list) list_only=true ;;
+        *) printf 'usage: %s [--optional] [--no-services] [--list]\n' "$0" >&2; exit 2 ;;
+    esac
+done
+
+# Plan entries are "kind<TAB>source<TAB>destination"; kind is link or seed.
+plan=()
+add_link() { plan+=("link	$1	$2"); }
+add_seed() { plan+=("seed	$1	$2"); }
+add_config() { add_link "$repo_dir/config/$1" "$home_dir/.config/$1"; }
+
+build_plan() {
+    local relative source directory
+    for relative in \
+        hypr/hyprland.lua hypr/hypridle.conf hypr/hyprlock.conf \
+        hypr/hyprqt6engine.conf hypr/hyprtoolkit.conf hypr/appearance.toml \
+        hypr/scrolloverview.lua; do
+        add_config "$relative"
+    done
+    for source in "$repo_dir"/config/hypr/scripts/* "$repo_dir"/config/hypr/shaders/* "$repo_dir"/config/hypr/patches/*; do
+        [[ -f "$source" ]] || continue
+        add_config "${source#"$repo_dir/config/"}"
+    done
+    for relative in noctalia/50-orbit-shell.toml noctalia/90-orbit-glass.toml noctalia/hooks.toml \
+        noctalia/templates/wallpaper-palette.lua; do
+        add_config "$relative"
+    done
+    for source in "$repo_dir"/config/quickshell/global-menu/*; do
+        [[ -f "$source" ]] || continue
+        add_config "${source#"$repo_dir/config/"}"
+    done
+    for relative in gtk-3.0/gtk.css \
+        gtk-3.0/gtk3-presentation.css gtk-3.0/shadow-overrides.css \
+        gtk-4.0/gtk.css gtk-4.0/gtk-dark.css gtk-4.0/nautilus-overrides.css \
+        gtk-4.0/shadow-overrides.css kitty/kitty.conf wezterm/wezterm.lua \
+        wezterm/orbit-about.lua zed/settings.json zed/themes/noctalia.json \
+        zen/orbit-userChrome.css obsidian/orbit-appearance.css \
+        actions-for-nautilus/config.json; do
+        add_config "$relative"
+    done
+
+    add_seed "$repo_dir/config/qt6ct/qt6ct.conf" "$home_dir/.config/qt6ct/qt6ct.conf"
+    # nwg-displays overwrites this; the placeholder only documents that.
+    add_seed "$repo_dir/config/hypr/monitors.example.lua" "$home_dir/.config/hypr/monitors.lua"
+    add_seed "$repo_dir/desktop/orbit-wallpaper-engine-settings.desktop" \
+        "$home_dir/.local/share/applications/orbit-wallpaper-engine-settings.desktop"
+
+    for source in "$repo_dir/bin"/*; do
+        [[ -f "$source" ]] || continue
+        add_link "$source" "$home_dir/.local/bin/$(basename "$source")"
+    done
+    for source in "$repo_dir/lib"/*; do
+        [[ -f "$source" ]] || continue
+        add_link "$source" "$home_dir/.local/lib/$(basename "$source")"
+    done
+    for source in "$repo_dir/systemd/user"/*.service "$repo_dir/systemd/user"/*.timer "$repo_dir/systemd/user"/*.target; do
+        [[ -f "$source" ]] || continue
+        add_link "$source" "$home_dir/.config/systemd/user/$(basename "$source")"
+    done
+    for directory in hypridle.service.d sunshine.service.d app-dev.lizardbyte.app.Sunshine.service.d; do
+        for source in "$repo_dir/systemd/user/$directory"/*; do
+            [[ -f "$source" ]] || continue
+            add_link "$source" "$home_dir/.config/systemd/user/$directory/$(basename "$source")"
+        done
+    done
+}
 
 link_owned() {
     local source="$1" destination="$2"
@@ -54,57 +131,26 @@ install_sound_theme() {
     done
 }
 
-link_config() {
-    local relative="$1"
-    link_owned "$repo_dir/config/$relative" "$home_dir/.config/$relative"
-}
+build_plan
 
-for relative in \
-    hypr/hyprland.lua hypr/hypridle.conf hypr/hyprlock.conf \
-    hypr/hyprqt6engine.conf hypr/hyprtoolkit.conf hypr/appearance.toml \
-    hypr/scrolloverview.lua; do
-    link_config "$relative"
-done
-for relative in hypr/scripts/* hypr/shaders/* hypr/patches/*; do
-    link_config "$relative"
-done
-for relative in noctalia/90-orbit-glass.toml noctalia/hooks.toml \
-    noctalia/templates/wallpaper-palette.lua; do
-    link_config "$relative"
-done
-for relative in quickshell/global-menu/* gtk-3.0/gtk.css \
-    gtk-3.0/gtk3-presentation.css gtk-3.0/shadow-overrides.css \
-    gtk-4.0/gtk.css gtk-4.0/gtk-dark.css gtk-4.0/nautilus-overrides.css \
-    gtk-4.0/shadow-overrides.css kitty/kitty.conf wezterm/wezterm.lua \
-    wezterm/orbit-about.lua zed/settings.json zed/themes/noctalia.json \
-    zen/orbit-userChrome.css obsidian/orbit-appearance.css \
-    actions-for-nautilus/config.json; do
-    link_config "$relative"
-done
+if [[ "$list_only" == true ]]; then
+    printf '%s\n' "${plan[@]}"
+    exit 0
+fi
 
-seed_file "$repo_dir/config/qt6ct/qt6ct.conf" "$home_dir/.config/qt6ct/qt6ct.conf"
-seed_file "$repo_dir/desktop/orbit-wallpaper-engine-settings.desktop" \
-    "$home_dir/.local/share/applications/orbit-wallpaper-engine-settings.desktop"
+for entry in "${plan[@]}"; do
+    IFS=$'\t' read -r kind source destination <<<"$entry"
+    case "$kind" in
+        link) link_owned "$source" "$destination" ;;
+        seed) seed_file "$source" "$destination" ;;
+    esac
+done
 install_sound_theme
 
-for source in "$repo_dir/bin"/*; do
-    [[ -f "$source" ]] || continue
-    link_owned "$source" "$home_dir/.local/bin/$(basename "$source")"
-done
-for source in "$repo_dir/lib"/*; do
-    [[ -f "$source" ]] || continue
-    link_owned "$source" "$home_dir/.local/lib/$(basename "$source")"
-done
-for source in "$repo_dir/systemd/user"/*.service "$repo_dir/systemd/user"/*.timer "$repo_dir/systemd/user"/*.target; do
-    [[ -f "$source" ]] || continue
-    link_owned "$source" "$home_dir/.config/systemd/user/$(basename "$source")"
-done
-for directory in hypridle.service.d app-dev.lizardbyte.app.Sunshine.service.d; do
-    for source in "$repo_dir/systemd/user/$directory"/*; do
-        [[ -f "$source" ]] || continue
-        link_owned "$source" "$home_dir/.config/systemd/user/$directory/$(basename "$source")"
-    done
-done
+if [[ "$services" == false ]]; then
+    printf 'Orbit links and seeds prepared from %s (services skipped)\n' "$repo_dir"
+    exit 0
+fi
 
 if [[ "$optional" == true ]]; then
     systemctl --user enable orbit-game-session.timer localsend.service
@@ -118,6 +164,12 @@ command -v noctalia >/dev/null 2>&1 || {
     printf 'Noctalia is required before generated appearance outputs can be refreshed.\n' >&2
     exit 1
 }
-noctalia msg templates-apply >/dev/null
-"$home_dir/.local/bin/orbit-update-all-colors" noctalia
+# On a first install Noctalia is not running yet; orbit-session-bootstrap
+# applies templates and adapters during the first Hyprland session instead.
+if noctalia msg templates-apply >/dev/null 2>&1; then
+    "$home_dir/.local/bin/orbit-update-all-colors" noctalia ||
+        printf 'warning: Orbit appearance adapters were not refreshed; they are generated at the next login.\n' >&2
+else
+    printf 'note: Noctalia is not running; templates and Orbit adapters are generated at the next login.\n' >&2
+fi
 printf 'Orbit source deployment prepared from %s\n' "$repo_dir"

@@ -1,0 +1,90 @@
+# Orbit shell baseline for Noctalia 5.
+#
+# Orbit owns the pieces Noctalia would otherwise duplicate: Hyprlock + Hypridle
+# handle lock/idle, the Orbit Wallpaper Engine draws the background, and
+# hyprpolkitagent answers PolicyKit prompts. Everything visual here is a
+# starting point; GUI changes land in ~/.local/state/noctalia/settings.toml and
+# win over this file. To carry an exact look from a reference machine, run
+# `noctalia config export` there and replace this file with the result.
+
+[shell]
+font_family = "JetBrains Mono"
+corner_radius_scale = 1.0
+polkit_agent = false
+setup_wizard_enabled = false
+settings_show_advanced = true
+
+    [shell.panel]
+    borders = false
+    session_placement = "floating"
+    session_position = "center"
+
+    [shell.greeter_sync]
+    auto_sync = false
+
+    [shell.window_switcher]
+    mru = true
+
+# Orbit Wallpaper Engine renders the wallpaper; Noctalia only supplies colors.
+[wallpaper]
+enabled = false
+
+# Hyprlock (via orbit-session-transition) is the lock screen; Hypridle owns idle.
+[lockscreen]
+enabled = false
+
+[idle.behavior.lock]
+enabled = false
+
+[idle.behavior.screen-off]
+enabled = false
+
+[idle.behavior.suspend]
+enabled = false
+
+[theme]
+mode = "dark"
+source = "wallpaper"
+wallpaper_scheme = "m3-tonal-spot"
+
+    # Orbit reads these outputs (see docs/generated-and-runtime.md). The kitty
+    # template is deliberately absent: orbit-theme writes themes/orbit.conf and
+    # Noctalia's kitty hook would rewrite the tracked kitty.conf include.
+    [theme.templates]
+    enable_builtin_templates = true
+    builtin_ids = [ "hyprland", "gtk3", "gtk4", "kcolorscheme", "wezterm" ]
+
+    [theme.templates.user.orbit_wallpaper_palette]
+    input_path = "$XDG_CONFIG_HOME/noctalia/templates/wallpaper-palette.lua"
+    output_path = "$XDG_CONFIG_HOME/orbit-wallpaper-engine/palette.lua"
+
+[bar]
+order = [ "Top" ]
+
+# orbit-noctalia-session-chrome hides and reveals the bar by this name.
+[bar.Top]
+position = "top"
+thickness = 34
+background_opacity = 0.7
+shadow = false
+radius = 0
+concave_edge_corners = false
+start = [ "launcher", "workspaces", "active_window" ]
+center = [ "clock" ]
+end = [ "media", "tray", "notifications", "network", "bluetooth", "volume", "battery", "control-center", "session" ]
+
+[widget.media]
+hide_when_no_media = true
+
+[widget.workspaces]
+show_labels = false
+
+[dock]
+enabled = true
+position = "bottom"
+background_opacity = 0.7
+shadow = false
+magnification = true
+show_running = true
+reserve_space = false
+pinned = [ "org.wezfurlong.wezterm", "org.gnome.Nautilus", "zen", "dev.zed.Zed", "obsidian" ]

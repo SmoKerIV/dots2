@@ -5,6 +5,17 @@ set -euo pipefail
 readonly app_id='com.dec05eba.gpu_screen_recorder'
 readonly flathub_url='https://dl.flathub.org/repo/flathub.flatpakrepo'
 
+# Arch/CachyOS: native package from [extra]. The Flatpak path is only used when
+# pacman is unavailable or --flatpak is requested.
+if [[ "${1:-}" != "--flatpak" ]] && command -v pacman >/dev/null 2>&1; then
+    sudo pacman -S --needed --noconfirm gpu-screen-recorder
+    gpu-screen-recorder --help >/dev/null 2>&1 || true
+    gsr-cli --help >/dev/null 2>&1 || true
+    printf 'GPU Screen Recorder is installed from the native package.\n'
+    printf 'Optional: sudo pacman -S gpu-screen-recorder-ui gpu-screen-recorder-notification\n'
+    exit 0
+fi
+
 command -v flatpak >/dev/null 2>&1 || {
     printf 'Flatpak is required but was not found.\n' >&2
     exit 1

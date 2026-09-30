@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# Installs the optional Orbit Plymouth theme system-wide and regenerates the
+# initramfs. Privileged and optional; not part of bootstrap/deploy.
+#
+# usage: install-plymouth-theme [--logo PATH] [--no-default]
+
+repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+source_dir="$repo_dir/plymouth/orbit"
+destination="/usr/share/plymouth/themes/orbit"
+set_default=true
+logo=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --logo) shift; logo=${1:?--logo requires a path} ;;
+        --no-default) set_default=false ;;
+        *) printf 'usage: %s [--logo PATH] [--no-default]\n' "$0" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+command -v plymouth-set-default-theme >/dev/null 2>&1 || {
+    printf 'plymouth is not installed (sudo pacman -S plymouth).\n' >&2
+    exit 1
+}
+
+if [[ -z "$logo" ]]; then
+    # CachyOS ships its logo as the watermark of its own Plymouth theme.
+    for candidate in \
+        /usr/share/plymouth/themes/cachyos/watermark.png \
+        /usr/share/plymouth/themes/cachyos-bootanimation/watermark.png \
+        /usr/share/pixmaps/archlinux-logo.png \
+        /usr/share/plymouth/themes/spinner/watermark.png; do
+        if [[ -f "$candidate" ]]; then
+            logo="$candidate"
+            break
+        fi
+    done
+fi
+[[ -n "$logo" && -f "$logo" ]] || {
+    printf 'No logo image was found; pass --logo PATH.\n' >&2
+    exit 1
+}
+
+grep -q 'plymouth' /etc/mkinitcpio.conf 2>/dev/null || {
+    printf 'warning: the plymouth hook is not in /etc/mkinitcpio.conf HOOKS; the theme will not show until it is added.\n' >&2
+}
+
+sudo install -d -m 0755 "$destination"
+sudo install -m 0644 "$source_dir/orbit.plymouth" "$destination/orbit.plymouth"
+sudo install -m 0644 "$source_dir/orbit.script" "$destination/orbit.script"
+sudo install -m 0644 "$logo" "$destination/logo.png"
+
+if [[ "$set_default" == true ]]; then
+    # -R rebuilds the initramfs through mkinitcpio so the theme is embedded.
+    sudo plymouth-set-default-theme -R orbit
+    printf 'Orbit is now the default Plymouth theme (logo: %s).\n' "$logo"
+else
+    printf 'Orbit Plymouth theme installed to %s; select it with: sudo plymouth-set-default-theme -R orbit\n' "$destination"
+fi

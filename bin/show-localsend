@@ -1,7 +1,30 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Runs LocalSend from the native package (CachyOS repo / AUR: /usr/bin/localsend)
+# and falls back to the Flatpak. `--daemon` execs the hidden background instance
+# for localsend.service; without it, the window is requested from the session.
 readonly app_id='org.localsend.localsend_app'
+
+localsend_command() {
+    if command -v localsend >/dev/null 2>&1; then
+        printf '%s\n' localsend
+    elif command -v localsend_app >/dev/null 2>&1; then
+        printf '%s\n' localsend_app
+    elif command -v flatpak >/dev/null 2>&1 && flatpak info "$app_id" >/dev/null 2>&1; then
+        printf 'flatpak run %s\n' "$app_id"
+    else
+        printf 'LocalSend is not installed (pacman -S localsend, or the %s Flatpak).\n' "$app_id" >&2
+        return 1
+    fi
+}
+
+command_line="$(localsend_command)"
+
+if [[ "${1:-}" == "--daemon" ]]; then
+    # shellcheck disable=SC2086
+    exec $command_line --hidden
+fi
 
 if ! systemctl --user is-active --quiet localsend.service; then
     printf 'LocalSend is not running. Start it with: systemctl --user start localsend.service\n' >&2
@@ -18,5 +41,6 @@ while IFS= read -r variable; do
     esac
 done < <(systemctl --user show-environment)
 
-env "${session_environment[@]}" flatpak run "$app_id" >/dev/null 2>&1 &
+# shellcheck disable=SC2086
+env "${session_environment[@]}" $command_line >/dev/null 2>&1 &
 printf 'Requested the LocalSend window.\n'

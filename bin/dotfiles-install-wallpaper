@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_url="${ORBIT_WALLPAPER_REPO_URL:-git@github.com:CleanShirtUK/orbit-wallpaper-engine.git}"
+repo_url="${ORBIT_WALLPAPER_REPO_URL:-https://github.com/CleanShirtUK/orbit-wallpaper-engine.git}"
 repo_dir="${ORBIT_WALLPAPER_REPO_DIR:-$HOME/.local/src/orbit-wallpaper-engine}"
 ref="${ORBIT_WALLPAPER_REF:-v0.2.0}"
 
@@ -42,9 +42,15 @@ git -C "$repo_dir" fetch --tags origin
 git -C "$repo_dir" checkout "$ref"
 make -C "$repo_dir"
 install_noctalia_integration
-install -D -m 0755 "$repo_dir/bin/orbit-wallpaper-launcher" "$HOME/.local/bin/orbit-wallpaper-launcher"
-install -D -m 0644 "$repo_dir/desktop/orbit-wallpaper-engine-settings.desktop" \
-    "$HOME/.local/share/applications/orbit-wallpaper-engine-settings.desktop"
+# bin/orbit-wallpaper-launcher and the settings desktop entry are Orbit-owned
+# and already deployed by bootstrap/deploy; the external checkout has no copy.
+for deployed in "$HOME/.local/bin/orbit-wallpaper-launcher" \
+    "$HOME/.local/share/applications/orbit-wallpaper-engine-settings.desktop"; do
+    [[ -e "$deployed" ]] || {
+        printf '%s is not deployed; run bootstrap/deploy first.\n' "$deployed" >&2
+        exit 1
+    }
+done
 
 systemctl --user daemon-reload
 systemctl --user enable --now orbit-wallpaper-engine.service

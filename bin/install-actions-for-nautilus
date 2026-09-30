@@ -16,9 +16,9 @@ for command in git make python3 nautilus; do
     }
 done
 
-if ! python3 -c 'import gi' >/dev/null 2>&1 || [[ ! -f /usr/lib64/nautilus/extensions-4/libnautilus-python.so ]]; then
-    printf 'Fedora dependencies are missing. Install them with:\n' >&2
-    printf '  sudo dnf install nautilus-python python3-gobject procps-ng js-jquery\n' >&2
+if ! python3 -c 'import gi' >/dev/null 2>&1 || { [[ ! -f /usr/lib/nautilus/extensions-4/libnautilus-python.so ]] && [[ ! -f /usr/lib64/nautilus/extensions-4/libnautilus-python.so ]]; }; then
+    printf 'Nautilus Python dependencies are missing. Install them with:\n' >&2
+    printf '  sudo pacman -S --needed nautilus-python python-gobject procps-ng\n' >&2
     exit 1
 fi
 

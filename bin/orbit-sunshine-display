@@ -129,7 +129,9 @@ watchdog() {
         if [[ ! -e "$state_file" ]]; then
             exit 0
         fi
-        if ! systemctl --user is-active --quiet app-dev.lizardbyte.app.Sunshine.service; then
+        # Native sunshine.service (CachyOS/AUR package) or the Flatpak's unit.
+        if ! systemctl --user is-active --quiet sunshine.service &&
+            ! systemctl --user is-active --quiet app-dev.lizardbyte.app.Sunshine.service; then
             log 'Sunshine disappeared during an active display session'
             "$0" restore
             exit 0

@@ -13,7 +13,8 @@ Generated or runtime files include:
 - systemd, Noctalia, browser, editor, and test state;
 - caches, logs, compiled plugins, and Python bytecode.
 
-`nwg-displays` generates `~/.config/hypr/monitors.lua` for each machine. The
+`nwg-displays` generates `~/.config/hypr/monitors.lua` for each machine
+(`bootstrap/deploy` seeds a placeholder so the first session still starts). The
 monitor file, Noctalia-derived color files, and generated Orbit adapters are
 not portable source inputs and are not committed. See
 [`file-map.md`](file-map.md) for ownership details.

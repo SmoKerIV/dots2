@@ -1,0 +1,266 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Replace an existing Hyprland/Noctalia configuration (CachyOS skeleton,
+# end-4 dots, or any other) with Orbit, keeping a restorable backup.
+#
+# bootstrap/deploy is refusal-only and stops at the first foreign file. This
+# command is the explicit exception: it moves every conflicting file into a
+# timestamped backup, then runs deploy. Nothing is deleted.
+#
+# usage: takeover [--dry-run] [--yes] [--optional] [--reset-noctalia-state]
+#        takeover --restore BACKUP_DIR
+#
+#   --dry-run               list what would be moved and stop
+#   --yes                   do not ask for confirmation
+#   --optional              pass --optional to deploy (game session, LocalSend)
+#   --reset-noctalia-state  also back up Noctalia's GUI overrides
+#                           (~/.local/state/noctalia/settings.toml) so the
+#                           tracked Orbit shell config is what you see
+#   --restore DIR           undo a previous takeover: remove the Orbit links it
+#                           created and move the backed-up files back
+
+repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+home_dir=${HOME:?HOME is required}
+config_dir=${XDG_CONFIG_HOME:-$home_dir/.config}
+state_root=${XDG_STATE_HOME:-$home_dir/.local/state}/orbit/takeover
+
+dry_run=false
+assume_yes=false
+optional=false
+reset_noctalia_state=false
+restore_dir=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dry-run) dry_run=true ;;
+        --yes) assume_yes=true ;;
+        --optional) optional=true ;;
+        --reset-noctalia-state) reset_noctalia_state=true ;;
+        --restore) shift; restore_dir=${1:?--restore requires a backup directory} ;;
+        -h|--help)
+            sed -n '3,22p' "$0" | sed 's/^# \{0,1\}//'
+            exit 0
+            ;;
+        *) printf 'usage: %s [--dry-run] [--yes] [--optional] [--reset-noctalia-state] | --restore DIR\n' "$0" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+log() { printf 'takeover: %s\n' "$*"; }
+
+# An "Orbit link" is a symlink that resolves into this checkout.
+is_orbit_link() {
+    [[ -L "$1" ]] && [[ "$(readlink -f "$1")" == "$repo_dir"/* ]]
+}
+
+relative_to_home() {
+    local path="$1"
+    [[ "$path" == "$home_dir"/* ]] || { printf 'path is outside HOME: %s\n' "$path" >&2; return 1; }
+    printf '%s\n' "${path#"$home_dir"/}"
+}
+
+# --- plan -------------------------------------------------------------------
+
+mapfile -t plan_lines < <("$repo_dir/bootstrap/deploy" --list)
+
+declare -A plan_destinations=()
+declare -A orbit_owned_dirs=()
+for line in "${plan_lines[@]}"; do
+    IFS=$'\t' read -r kind source destination <<<"$line"
+    plan_destinations["$destination"]="$kind	$source"
+    # Directories Orbit fills with links; foreign leftovers in them are moved.
+    case "$destination" in
+        "$config_dir"/hypr/scripts/*|"$config_dir"/hypr/shaders/*|"$config_dir"/hypr/patches/*|"$config_dir"/quickshell/global-menu/*)
+            orbit_owned_dirs["$(dirname "$destination")"]=1 ;;
+    esac
+done
+
+# Foreign configuration that would still be loaded next to Orbit's files.
+foreign_candidates=(
+    "$config_dir/hypr/hyprland.conf"
+    "$config_dir/hypr/config"
+    "$config_dir/hypr/hyprland"
+    "$config_dir/hypr/custom"
+    "$config_dir/hypr/lua"
+    "$config_dir/hypr/hyprlock"
+    "$config_dir/hypr/hyprland-gui.lua"
+    "$config_dir/hypr/hyprland-gui.conf"
+    "$config_dir/hypr/workspaces.lua"
+    "$config_dir/hypr/workspaces.conf"
+    "$config_dir/hypr/monitors.conf"
+    "$config_dir/hypr/hypridle.conf"
+    "$config_dir/hypr/hyprlock.conf"
+)
+
+conflicts=()
+add_conflict() {
+    local path="$1" reason="$2"
+    conflicts+=("$path	$reason")
+}
+
+collect_conflicts() {
+    local destination kind source entry path
+
+    for destination in "${!plan_destinations[@]}"; do
+        IFS=$'\t' read -r kind source <<<"${plan_destinations[$destination]}"
+        if is_orbit_link "$destination"; then
+            continue
+        fi
+        if [[ -L "$destination" ]]; then
+            add_conflict "$destination" "unrelated symlink"
+        elif [[ -d "$destination" ]]; then
+            add_conflict "$destination" "directory where Orbit places a file"
+        elif [[ -e "$destination" ]]; then
+            if [[ "$kind" == seed ]] && cmp -s "$source" "$destination"; then
+                continue
+            fi
+            # monitors.lua is machine-local by design; an nwg-displays layout
+            # from a previous setup is exactly what deploy would leave in place.
+            if [[ "$kind" == seed && "$destination" == "$config_dir/hypr/monitors.lua" ]]; then
+                continue
+            fi
+            add_conflict "$destination" "existing $kind target"
+        fi
+    done
+
+    for path in "${!orbit_owned_dirs[@]}"; do
+        [[ -d "$path" && ! -L "$path" ]] || continue
+        for entry in "$path"/* "$path"/.[!.]*; do
+            [[ -e "$entry" || -L "$entry" ]] || continue
+            [[ -n "${plan_destinations[$entry]:-}" ]] && continue
+            add_conflict "$entry" "foreign file in an Orbit-managed directory"
+        done
+    done
+
+    for path in "${foreign_candidates[@]}"; do
+        [[ -e "$path" || -L "$path" ]] || continue
+        [[ -n "${plan_destinations[$path]:-}" ]] && continue
+        add_conflict "$path" "foreign Hyprland configuration"
+    done
+
+    # Every other Noctalia drop-in merges into the same shell config and can
+    # define extra bars or override Orbit's shell settings.
+    for path in "$config_dir"/noctalia/*.toml; do
+        [[ -e "$path" || -L "$path" ]] || continue
+        [[ -n "${plan_destinations[$path]:-}" ]] && continue
+        add_conflict "$path" "foreign Noctalia configuration"
+    done
+
+    if [[ "$reset_noctalia_state" == true ]]; then
+        path="${XDG_STATE_HOME:-$home_dir/.local/state}/noctalia/settings.toml"
+        [[ -e "$path" ]] && add_conflict "$path" "Noctalia GUI overrides (--reset-noctalia-state)"
+    fi
+}
+
+# --- restore ----------------------------------------------------------------
+
+restore() {
+    local backup="$1" manifest relative destination kind source line parent
+    manifest="$backup/manifest.txt"
+    [[ -f "$manifest" ]] || { printf 'not a takeover backup (missing manifest): %s\n' "$backup" >&2; exit 1; }
+
+    # Undo the deployment first: links resolving into this checkout and seeds
+    # still identical to their source are ours to remove.
+    for line in "${plan_lines[@]}"; do
+        IFS=$'\t' read -r kind source destination <<<"$line"
+        if is_orbit_link "$destination"; then
+            rm -f "$destination"
+        elif [[ "$kind" == seed && -f "$destination" && ! -L "$destination" ]] && cmp -s "$source" "$destination"; then
+            rm -f "$destination"
+        fi
+    done
+    # Drop directories deploy created that are now empty, stopping at well-known roots.
+    for line in "${plan_lines[@]}"; do
+        IFS=$'\t' read -r kind source destination <<<"$line"
+        parent=$(dirname "$destination")
+        while [[ "$parent" != "$home_dir" && "$parent" != "$config_dir" && "$parent" != "$home_dir/.local" && "$parent" != "$home_dir/.local/share" && "$parent" != "$home_dir/.local/bin" && "$parent" != "$home_dir/.local/lib" ]]; do
+            rmdir "$parent" 2>/dev/null || break
+            parent=$(dirname "$parent")
+        done
+    done
+
+    while IFS= read -r relative; do
+        [[ -n "$relative" ]] || continue
+        destination="$home_dir/$relative"
+        if [[ -e "$destination" || -L "$destination" ]]; then
+            if [[ -d "$destination" && ! -L "$destination" ]]; then
+                rmdir "$destination" 2>/dev/null || {
+                    printf 'restore refused: %s is not empty\n' "$destination" >&2
+                    exit 1
+                }
+            else
+                printf 'restore refused: %s changed after the takeover\n' "$destination" >&2
+                exit 1
+            fi
+        fi
+        mkdir -p "$(dirname "$destination")"
+        mv "$backup/files/$relative" "$destination"
+        log "restored $relative"
+    done <"$manifest"
+
+    systemctl --user disable orbit-wallpaper-engine.service workspace-alt-tab-input.service \
+        workspace-alt-tab-release.service new-workspace-apps.service \
+        window-shader-events.service hypridle.service hyprpolkitagent.service \
+        orbit-game-session.timer localsend.service >/dev/null 2>&1 || true
+    systemctl --user daemon-reload >/dev/null 2>&1 || true
+    log "restore complete; the backup directory $backup can be removed by hand"
+}
+
+if [[ -n "$restore_dir" ]]; then
+    restore "$restore_dir"
+    exit 0
+fi
+
+# --- takeover ---------------------------------------------------------------
+
+collect_conflicts
+
+if (( ${#conflicts[@]} == 0 )); then
+    log "nothing to replace"
+else
+    printf 'The following will be moved to a backup before Orbit is deployed:\n'
+    for entry in "${conflicts[@]}"; do
+        IFS=$'\t' read -r path reason <<<"$entry"
+        printf '  %-60s %s\n' "${path#"$home_dir"/}" "($reason)"
+    done
+fi
+
+if [[ "$dry_run" == true ]]; then
+    printf 'dry run: no files were changed\n'
+    exit 0
+fi
+
+if [[ "$assume_yes" != true && ${#conflicts[@]} -gt 0 ]]; then
+    read -r -p 'Continue? [y/N] ' answer
+    [[ "$answer" == [yY]* ]] || { printf 'aborted\n'; exit 1; }
+fi
+
+timestamp=$(date -u +%Y%m%dT%H%M%SZ)
+backup="$state_root/$timestamp"
+if (( ${#conflicts[@]} > 0 )); then
+    mkdir -p "$backup/files"
+    : >"$backup/manifest.txt"
+    # Deepest paths first so a directory is never moved before its children
+    # were considered on their own.
+    mapfile -t ordered < <(printf '%s\n' "${conflicts[@]}" |
+        awk -F'\t' 'BEGIN { OFS = "\t" } { depth = split($1, parts, "/"); print depth, $0 }' |
+        sort -t$'\t' -k1,1nr | cut -f2-)
+    for entry in "${ordered[@]}"; do
+        IFS=$'\t' read -r path reason <<<"$entry"
+        [[ -e "$path" || -L "$path" ]] || continue
+        relative=$(relative_to_home "$path")
+        mkdir -p "$backup/files/$(dirname "$relative")"
+        mv "$path" "$backup/files/$relative"
+        printf '%s\n' "$relative" >>"$backup/manifest.txt"
+        log "moved $relative"
+    done
+    log "backup written to $backup"
+fi
+
+deploy_arguments=()
+[[ "$optional" == true ]] && deploy_arguments+=(--optional)
+"$repo_dir/bootstrap/deploy" "${deploy_arguments[@]}"
+
+if (( ${#conflicts[@]} > 0 )); then
+    printf '\nUndo with:\n  %s --restore %s\n' "$0" "$backup"
+fi

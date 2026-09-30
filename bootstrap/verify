@@ -30,10 +30,13 @@ check_file() {
 if [[ "$source_only" == false ]]; then
     for relative in hypr/hyprland.lua hypr/hypridle.conf hypr/hyprlock.conf \
         hypr/hyprtoolkit.conf hypr/appearance.toml \
-        noctalia/90-orbit-glass.toml noctalia/hooks.toml \
+        noctalia/50-orbit-shell.toml noctalia/90-orbit-glass.toml noctalia/hooks.toml \
         quickshell/global-menu/shell.qml kitty/kitty.conf; do
         check_link "$repo_dir/config/$relative" "$home_dir/.config/$relative"
     done
+    check_link "$repo_dir/systemd/user/hyprpolkitagent.service" "$home_dir/.config/systemd/user/hyprpolkitagent.service"
+    check_link "$repo_dir/systemd/user/sunshine.service.d/orbit-display.conf" \
+        "$home_dir/.config/systemd/user/sunshine.service.d/orbit-display.conf"
     check_file "$repo_dir/desktop/orbit-wallpaper-engine-settings.desktop" \
         "$home_dir/.local/share/applications/orbit-wallpaper-engine-settings.desktop"
     for source in "$repo_dir/bin"/*; do
@@ -64,6 +67,23 @@ for script in "$repo_dir/bin"/* "$repo_dir/bootstrap"/* "$repo_dir/config/hypr/s
         '#!'*'/bash'|'#!'*'/sh') bash -n "$script" ;;
     esac
 done
+
+if command -v luac >/dev/null 2>&1; then
+    for lua in "$repo_dir"/config/hypr/*.lua "$repo_dir"/config/wezterm/*.lua; do
+        [[ -f "$lua" ]] || continue
+        luac -p "$lua"
+    done
+fi
+
+if command -v noctalia >/dev/null 2>&1; then
+    for toml in "$repo_dir"/config/noctalia/*.toml; do
+        noctalia config validate "$toml" >/dev/null 2>&1 || {
+            printf 'invalid Noctalia configuration: %s\n' "$toml" >&2
+            noctalia config validate "$toml" 2>&1 | grep -v INF >&2 || true
+            exit 1
+        }
+    done
+fi
 
 if [[ "$source_only" == true ]]; then
     printf 'Orbit source validation is valid.\n'

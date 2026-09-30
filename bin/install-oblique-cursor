@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# Installs the Oblique hyprcursor theme that hyprland.lua selects through
+# HYPRCURSOR_THEME. The pinned upstream commit ships a prebuilt theme in dist/;
+# hyprcursor-util (Arch: hyprcursor) is only needed when that folder is absent.
+repo_url="https://github.com/kayxean/oblique-cursor.git"
+repo_commit="ecddc552b8a5eb53fbf7498f0e60fbd634906b4a"
+theme_name="oblique-cursor"
+source_dir="${ORBIT_PLUGIN_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/orbit-hyprland-plugins}/oblique-cursor-$repo_commit"
+icons_dir="${XDG_DATA_HOME:-$HOME/.local/share}/icons"
+destination="$icons_dir/$theme_name"
+
+command -v git >/dev/null || { printf '%s\n' 'error: git is required' >&2; exit 1; }
+
+if [[ ! -d "$source_dir/.git" ]]; then
+    mkdir -p "${source_dir%/*}"
+    git clone --filter=blob:none "$repo_url" "$source_dir"
+fi
+
+git -C "$source_dir" fetch --quiet --depth=1 origin "$repo_commit"
+git -C "$source_dir" checkout --quiet --detach "$repo_commit"
+git -C "$source_dir" reset --quiet --hard "$repo_commit"
+[[ "$(git -C "$source_dir" rev-parse HEAD)" == "$repo_commit" ]] || {
+    printf '%s\n' 'error: Oblique Cursor checkout did not reach the pinned commit' >&2
+    exit 1
+}
+
+built_theme="$source_dir/dist/theme_$theme_name"
+if [[ ! -f "$built_theme/manifest.hl" ]]; then
+    command -v hyprcursor-util >/dev/null || {
+        printf '%s\n' 'error: prebuilt theme is missing and hyprcursor-util is unavailable (pacman -S hyprcursor)' >&2
+        exit 1
+    }
+    (cd "$source_dir/themes" && hyprcursor-util --create "$theme_name" --output "$source_dir/dist")
+fi
+[[ -f "$built_theme/manifest.hl" ]] || {
+    printf 'error: built theme is missing a manifest: %s\n' "$built_theme" >&2
+    exit 1
+}
+
+if [[ -L "$destination" ]]; then
+    rm -f "$destination"
+elif [[ -d "$destination" ]]; then
+    # Only replace something that is itself a hyprcursor theme.
+    [[ -f "$destination/manifest.hl" ]] || {
+        printf 'refusing to replace unrelated directory: %s\n' "$destination" >&2
+        exit 1
+    }
+    rm -rf "$destination"
+fi
+mkdir -p "$icons_dir"
+cp -R "$built_theme" "$destination"
+printf 'Installed the %s hyprcursor theme to %s\n' "$theme_name" "$destination"

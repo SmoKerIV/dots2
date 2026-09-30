@@ -5,7 +5,8 @@
 Window.SetBackgroundTopColor(0.035, 0.039, 0.055);
 Window.SetBackgroundBottomColor(0.020, 0.023, 0.035);
 
-title.image = Image("fedora-logo-icon.png");
+# logo.png is placed by install-plymouth-theme (CachyOS watermark by default).
+title.image = Image("logo.png");
 title.image = title.image.Scale(300, 300);
 title.sprite = Sprite(title.image);
 title.x = Window.GetX() + Window.GetWidth() / 2 - title.image.GetWidth() / 2;

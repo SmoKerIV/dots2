@@ -2,13 +2,20 @@
 set -euo pipefail
 
 readonly app_id='org.localsend.localsend_app'
-readonly settings_file="${FLATPAK_USER_DIR:-$HOME/.var/app}/$app_id/data/org.localsend.localsend_app/shared_preferences.json"
+# Native package (Flutter shared_preferences under XDG_DATA_HOME) first, then Flatpak.
+readonly native_settings="${XDG_DATA_HOME:-$HOME/.local/share}/$app_id/shared_preferences.json"
+readonly flatpak_settings="${FLATPAK_USER_DIR:-$HOME/.var/app}/$app_id/data/$app_id/shared_preferences.json"
 
-if [[ ! -f "$settings_file" ]]; then
-    printf 'LocalSend settings were not found: %s\n' "$settings_file" >&2
+if [[ -f "$native_settings" ]]; then
+    settings_file="$native_settings"
+elif [[ -f "$flatpak_settings" ]]; then
+    settings_file="$flatpak_settings"
+else
+    printf 'LocalSend settings were not found: %s\n' "$native_settings" >&2
     printf 'Launch LocalSend once before running this command.\n' >&2
     exit 1
 fi
+readonly settings_file
 
 tmp_file=$(mktemp "${settings_file}.tmp.XXXXXX")
 trap 'rm -f "$tmp_file"' EXIT

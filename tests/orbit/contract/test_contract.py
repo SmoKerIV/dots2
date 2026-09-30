@@ -8,6 +8,7 @@ import importlib.util
 import json
 import os
 import subprocess
+import tempfile
 import tomllib
 import unittest
 from pathlib import Path
@@ -235,6 +236,131 @@ class CurrentArchitectureTests(unittest.TestCase):
         self.assertIn('45 }', launcher)
         self.assertIn("Exec=orbit-wallpaper-launcher", desktop)
         self.assertNotIn("Exec=orbit-wallpaper-settings", desktop)
+
+
+class CachyOSPortTests(unittest.TestCase):
+    """The CachyOS/Arch port: default binds preserved, no Fedora-only paths."""
+
+    def test_hyprland_binds_follow_cachyos_defaults(self):
+        hyprland = (HYPR / "hyprland.lua").read_text()
+        for snippet in (
+            'hl.bind(mainMod .. " + Return",     hl.dsp.exec_cmd(launchPrefix .. terminal))',
+            'hl.bind(mainMod .. " + Q",           hl.dsp.window.close())',
+            'hl.bind(mainMod .. " + Space",      hl.dsp.exec_cmd(launcher))',
+            'hl.bind(mainMod .. " + E",          hl.dsp.exec_cmd(launchPrefix .. fileManager))',
+            'hl.bind(mainMod .. " + W",          hl.dsp.exec_cmd(launchPrefix .. BROWSER))',
+            'hl.bind(mainMod .. " + V", hl.dsp.exec_cmd(noctCall .. "panel-toggle clipboard"))',
+            'hl.bind(mainMod .. " + S",         hl.dsp.workspace.toggle_special())',
+            'hl.bind("Print",               hl.dsp.exec_cmd(noctCall .. "screenshot-region"))',
+            'hl.bind("XF86AudioRaiseVolume", hl.dsp.exec_cmd(noctCall .. "volume-up")',
+            'hl.bind(mainMod .. " + CONTROL + Down",  hl.dsp.focus({ workspace = "emptym" }))',
+            'return "code:" .. (d == 0 and 19 or (9 + d))',
+        ):
+            self.assertIn(snippet, hyprland, snippet)
+        # Same keys, Orbit implementation.
+        self.assertIn('hl.bind("ALT + Tab",         hl.dsp.exec_cmd(workspaceAltTab .. " cycle"))', hyprland)
+        self.assertIn('hl.bind(mainMod .. " + L",          hl.dsp.exec_cmd(animateLock))', hyprland)
+        self.assertIn('hl.dsp.exec_cmd(focusDirectional .. " " .. direction)', hyprland)
+        self.assertIn('hl.dsp.exec_cmd(moveWindowWorkspace .. " " .. direction)', hyprland)
+        self.assertIn('TASK_MANAGER = "missioncenter"', hyprland)
+        # Orbit-only extras live on keys the CachyOS layout leaves free.
+        for snippet in (
+            'hl.bind(mainMod .. " + ALT + A",   hl.dsp.exec_cmd(chatGPT))',
+            'hl.bind(mainMod .. " + ALT + S",   hl.dsp.exec_cmd(openCode))',
+            'hl.bind(mainMod .. " + ALT + D",   hl.dsp.exec_cmd(dailyNote))',
+            'hl.bind(mainMod .. " + SHIFT + D", hl.dsp.exec_cmd(scratchpad))',
+        ):
+            self.assertIn(snippet, hyprland, snippet)
+        # Old Orbit-only bindings that collide with CachyOS keys are gone.
+        self.assertNotIn('hl.bind(mainMod .. " + C", hl.dsp.window.close())', hyprland)
+        self.assertNotIn('hl.bind(mainMod .. " + A", hl.dsp.exec_cmd(chatGPT))', hyprland)
+        self.assertNotIn("flatpak", hyprland)
+        # Fresh installs have neither monitors.lua nor noctalia.lua yet.
+        self.assertIn('if not pcall(require, "monitors") then', hyprland)
+        self.assertIn('pcall(function() require("noctalia").apply_theme() end)', hyprland)
+        subprocess.run(["luac", "-p", str(HYPR / "hyprland.lua")], check=True, capture_output=True)
+
+    def test_units_use_arch_paths(self):
+        polkit = (UNIT_DIR / "hyprpolkitagent.service").read_text()
+        self.assertIn("ExecStart=/usr/lib/hyprpolkitagent/hyprpolkitagent", polkit)
+        self.assertNotIn("libexec", polkit)
+        localsend = (UNIT_DIR / "localsend.service").read_text()
+        self.assertIn("ExecStart=%h/.local/bin/show-localsend --daemon", localsend)
+        for unit in UNIT_DIR.rglob("*"):
+            if unit.is_file():
+                self.assertNotIn("flatpak", unit.read_text(), unit)
+        self.assertTrue((UNIT_DIR / "sunshine.service.d/orbit-display.conf").is_file())
+        self.assertIn("sunshine.service", (BIN / "orbit-sunshine-display").read_text())
+
+    def test_noctalia_shell_config_owns_orbit_boundaries(self):
+        config = tomllib.loads((REPO / "config/noctalia/50-orbit-shell.toml").read_text())
+        self.assertFalse(config["shell"]["polkit_agent"])
+        self.assertFalse(config["wallpaper"]["enabled"])
+        self.assertFalse(config["lockscreen"]["enabled"])
+        self.assertIn("Top", config["bar"])
+        self.assertIn("hyprland", config["theme"]["templates"]["builtin_ids"])
+        self.assertIn("wezterm", config["theme"]["templates"]["builtin_ids"])
+        self.assertIn("orbit_wallpaper_palette", config["theme"]["templates"]["user"])
+
+    def test_pinned_cachyos_installers(self):
+        installers = {
+            "install-dynamic-cursors": (
+                "https://github.com/virtcode/hypr-dynamic-cursors.git",
+                "5a224284872208b5324759d535d65061043725de",
+                "out/dynamic-cursors.so",
+            ),
+            "install-oblique-cursor": (
+                "https://github.com/kayxean/oblique-cursor.git",
+                "ecddc552b8a5eb53fbf7498f0e60fbd634906b4a",
+                "dist/theme_",
+            ),
+        }
+        for name, (url, revision, artifact) in installers.items():
+            path = BIN / name
+            source = path.read_text()
+            self.assertTrue(os.access(path, os.X_OK), path)
+            self.assertIn(url, source)
+            self.assertIn(revision, source)
+            self.assertIn(artifact, source)
+        shade = (BIN / "install-hyprwindowshade").read_text()
+        self.assertIn("pkg-config --exists hyprland", shade)
+        self.assertIn("/var/cache/hyprpm", shade)
+        for name in ("install-gpu-screen-recorder", "install-actions-for-nautilus"):
+            self.assertIn("pacman", (BIN / name).read_text(), name)
+        self.assertNotIn("dnf", (BIN / "install-actions-for-nautilus").read_text())
+        for path in BIN.iterdir():
+            if path.is_file():
+                self.assertNotIn(b"dnf install", path.read_bytes(), path)
+
+    def test_bootstrap_scripts_for_cachyos(self):
+        for name in ("takeover", "install-packages", "install-cachyos", "deploy", "verify"):
+            path = REPO / "bootstrap" / name
+            self.assertTrue(os.access(path, os.X_OK), path)
+            subprocess.run(["bash", "-n", str(path)], check=True, capture_output=True, text=True)
+        packages = (REPO / "bootstrap/install-packages").read_text()
+        for package in ("hyprland", "hyprpm", "noctalia", "quickshell", "nwg-displays", "python-evdev", "ttf-jetbrains-mono", "hyprqt6engine"):
+            self.assertIn(package, packages)
+        with tempfile.TemporaryDirectory() as home:
+            listing = subprocess.run(
+                [str(REPO / "bootstrap/deploy"), "--list"],
+                check=True, capture_output=True, text=True, env={**os.environ, "HOME": home},
+            ).stdout
+        self.assertIn(f"link\t{REPO}/config/noctalia/50-orbit-shell.toml\t{home}/.config/noctalia/50-orbit-shell.toml", listing)
+        self.assertIn(f"seed\t{REPO}/config/hypr/monitors.example.lua\t{home}/.config/hypr/monitors.lua", listing)
+        self.assertIn(f"link\t{REPO}/systemd/user/sunshine.service.d/orbit-display.conf", listing)
+
+    def test_plymouth_theme_is_distro_neutral(self):
+        script = (REPO / "plymouth/orbit/orbit.script").read_text()
+        self.assertIn('Image("logo.png")', script)
+        self.assertNotIn("fedora", script.lower())
+        self.assertFalse((REPO / "plymouth/orbit/fedora-logo-icon.png").exists())
+        installer = (BIN / "install-plymouth-theme").read_text()
+        self.assertIn("plymouth-set-default-theme -R orbit", installer)
+        self.assertIn("/usr/share/plymouth/themes/cachyos/watermark.png", installer)
+
+    def test_greeter_sync_is_gated_on_greetd(self):
+        sync = (BIN / "orbit-sync-noctalia-greeter").read_text()
+        self.assertIn("systemctl is-enabled --quiet greetd.service", sync)
 
 
 if __name__ == "__main__":

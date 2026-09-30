@@ -1,117 +1,141 @@
 # Installation
 
-This is the canonical Orbit v0.1 installation path. It assumes a Fedora 44
-Wayland system with Hyprland installed or ready to install. Commands below are
-run from the Orbit checkout unless stated otherwise.
+This is the canonical Orbit v0.1 installation path for CachyOS (Arch Linux).
+It assumes the CachyOS Hyprland edition or any CachyOS/Arch install with
+Hyprland available from the official repositories. Commands below are run from
+the Orbit checkout unless stated otherwise.
 
-## 1. Install Dependencies
-
-Install the required Fedora packages from [`dependencies.md`](dependencies.md).
-The exact package names can vary with Fedora repositories, but the base set is:
+## Quick path
 
 ```sh
-sudo dnf install \
-  hyprland hypridle hyprlock noctalia hyprpolkitagent \
-  quickshell nwg-displays \
-  xdg-desktop-portal xdg-desktop-portal-hyprland \
-  python3 python3-pyudev jq socat util-linux shadow-utils procps-ng \
-  grim slurp wl-clipboard zenity libcanberra-gtk3 alsa-utils \
-  git gcc-c++ make pkgconf patch
-```
-
-The source-built plugins also require the development packages listed in
-`dependencies.md`. If a plugin installer reports a missing `pkg-config`
-dependency, install that dependency's Fedora `-devel` package and rerun it.
-
-## 2. Clone And Review
-
-```sh
-git clone <orbit-repository-url> ~/src/orbit-dotfiles
+git clone https://github.com/CleanShirtUK/dotfiles.git ~/src/orbit-dotfiles
 cd ~/src/orbit-dotfiles
+./bootstrap/install-cachyos            # add --optional for Steam/Sunshine/LocalSend/etc.
 ```
 
-Do not delete an existing dotfiles repository or home-directory configuration.
-Back up important files first. Orbit deployment refuses to overwrite unrelated
-regular files and symlinks.
+`install-cachyos` runs the steps below in order and stops at the first
+failure; each step is idempotent and can be rerun on its own. Add
+`--reset-noctalia-state` to also set aside Noctalia's GUI overrides so the
+tracked Orbit shell layout is what you see, and `--yes` to skip the takeover
+confirmation.
 
-For an existing configuration, preview the bounded adoption process:
+Afterwards log out, choose the **Hyprland** session in SDDM (not the
+UWSM-managed entry), and run `nwg-displays` once.
+
+## 1. Install Packages
 
 ```sh
-./bootstrap/migrate --dry-run
+./bootstrap/install-packages              # core + build toolchain + AUR (paru)
+./bootstrap/install-packages --optional   # applications Orbit integrates with
+./bootstrap/install-packages --all --dry-run
 ```
 
-If the report is acceptable, `./bootstrap/migrate --adopt` creates a manifest
-and snapshots files it replaces under `${XDG_STATE_HOME:-$HOME/.local/state}/orbit/migrations/`.
-It does not replace directories and blocks unexpected content.
+Everything with an official package comes from `[extra]`/`[core]`; the
+CachyOS repository supplies the AUR-derived applications (`localsend`,
+`sunshine`, `zen-browser-bin`, `chatgpt-desktop-bin`) as normal pacman
+packages, and `paru` (shipped with CachyOS) installs the two AUR packages
+(`hyprqt6engine`, `kora-icon-theme`). The script also adds your user to the
+`input` group, which `workspace-alt-tab-input.service` needs; that takes effect
+at the next login. The package groups are listed in
+[`dependencies.md`](dependencies.md).
 
-## 3. Deploy Orbit
+## 2. Replace The Existing Configuration
+
+A fresh CachyOS Hyprland install ships `cachyos-hypr-noctalia`, which places
+`~/.config/hypr/hyprland.lua`, `~/.config/hypr/config/*.lua`,
+`~/.config/noctalia/config.toml`, `kitty.conf`, GTK CSS, and `qt6ct.conf` in
+the home directory. `bootstrap/deploy` refuses to overwrite any of them, so:
 
 ```sh
-./bootstrap/deploy
+./bootstrap/takeover --dry-run   # list what would be moved
+./bootstrap/takeover             # back up, then deploy
 ```
 
-This creates Orbit-owned symlinks under `~/.config`, `~/.local/bin`,
-`~/.local/lib`, and `~/.config/systemd/user`; seeds copy-once files such as
-Qt6 configuration and the desktop entry; enables core user units; and asks
-Noctalia to apply templates. It does not install packages, compile plugins,
-modify monitor layout, or perform privileged operations.
+Takeover moves every conflicting file into
+`~/.local/state/orbit/takeover/<timestamp>/`, writes a manifest, and runs
+`bootstrap/deploy`. Nothing is deleted. It also sets aside foreign Hyprland
+modules (`hypr/config`, `hypr/custom`, `hyprland.conf`, …) and other Noctalia
+drop-ins that would otherwise load next to Orbit's files. Undo with:
 
-`./bootstrap/deploy --optional` additionally enables the optional game-session
-and LocalSend user services. It does not install their applications.
+```sh
+./bootstrap/takeover --restore ~/.local/state/orbit/takeover/<timestamp>
+```
 
-## 4. Install External Components
+Deploy itself creates Orbit-owned symlinks under `~/.config`, `~/.local/bin`,
+`~/.local/lib`, and `~/.config/systemd/user`; seeds copy-once files
+(`qt6ct.conf`, a `monitors.lua` placeholder, the desktop entry); enables core
+user units; and refreshes Noctalia templates when Noctalia is running. Use
+`./bootstrap/deploy --optional` to also enable the game-session and LocalSend
+units, and `--list` to print the plan.
 
-The plugin installers use pinned upstream commits and build outside the Orbit
-checkout. They do not enable, reload, or replace a plugin in the running
-compositor:
+For a home that is already Orbit-shaped (a previous machine), the bounded
+`bootstrap/migrate --dry-run` / `--adopt` / `--rollback` flow remains available.
+
+## 3. Build External Components
+
+Arch's `hyprland` package installs the compositor headers and `hyprland.pc`, so
+the plugins build against exactly the running ABI without `hyprpm update`:
 
 ```sh
 ./bin/install-hyprglass
 ./bin/install-scrolloverview
 ./bin/install-hyprwindowshade
+./bin/install-dynamic-cursors
+./bin/install-oblique-cursor
 ```
 
-Dynamic Cursors is also ABI-sensitive. Its pinned source revision and upstream
-build path are documented in [`external-components.md`](external-components.md);
-build it outside the checkout and install `out/dynamic-cursors.so` to
-`~/.local/share/hyprland/plugins/dynamic-cursors.so`.
+The installers use pinned upstream commits, build under the user cache, and
+install only the resulting `.so` files to `~/.local/share/hyprland/plugins/`
+(the cursor theme goes to `~/.local/share/icons/oblique-cursor`). They do not
+load anything into the running compositor. The accepted reference for all
+plugins is Hyprland `0.56.2` at commit
+`efb50993780079460b0cbed1363e2166a2de1d9f`; rebuild after a Hyprland update.
 
-The accepted reference for all four plugins is Hyprland `0.56.2` at commit
-`efb50993780079460b0cbed1363e2166a2de1d9f`. Rebuild them after a material
-Hyprland ABI update. Do not substitute an upstream moving `main` build.
-
-Wallpaper Engine is a separate project. Its v0.1 deployment includes a
-tracked x86-64 runtime artifact and a pinned external checkout. Use an HTTPS
-remote when the GitHub SSH remote is not configured:
+Wallpaper Engine is a separate project:
 
 ```sh
-ORBIT_WALLPAPER_REPO_URL=https://github.com/CleanShirtUK/orbit-wallpaper-engine.git \
-  ./bin/dotfiles-install-wallpaper
+./bin/dotfiles-install-wallpaper
 ```
 
-This builds the external project, installs its Noctalia integration, installs
-Orbit's launcher entry, and enables/starts its user service. Its source remains
-outside this repository. Details and the artifact limitation are in
+This clones the pinned `v0.2.0` tag over HTTPS into
+`~/.local/src/orbit-wallpaper-engine`, builds it, installs its Noctalia
+integration and settings tool, and enables the user service. The runtime used
+by the service is the tracked x86-64 artifact described in
 [`external-components.md`](external-components.md).
 
-## 5. Configure This Machine
+## 4. Configure This Machine
 
-Monitor layout is intentionally machine-local. Run:
+Monitor layout is intentionally machine-local:
 
 ```sh
 nwg-displays
 ```
 
-The generated `~/.config/hypr/monitors.lua` is not shipped or committed.
-Orbit discovers connected monitors at runtime for semantic workspace behavior.
-Noctalia is the source of truth for colors and palette templates; do not edit
-generated color outputs as if they were Orbit inputs.
+It overwrites the seeded `~/.config/hypr/monitors.lua`; Orbit discovers
+connected monitors at runtime for semantic workspace behavior and the
+`SUPER+1/2/3` monitor binds. Noctalia is the source of truth for colors; do not
+edit generated color outputs as if they were Orbit inputs.
 
-Sunshine requires an additional machine-local profile copied from
-`config/orbit/machine/sunshine-display.conf.example`. Optional Plymouth setup
-requires privileged initramfs work and is not part of standard deployment.
+The tracked Noctalia shell layout
+([`config/noctalia/50-orbit-shell.toml`](../config/noctalia/50-orbit-shell.toml))
+is a starter. GUI changes land in `~/.local/state/noctalia/settings.toml` and
+win over it. To carry an exact look from another Orbit machine, run
+`noctalia config export` there and replace the tracked file.
 
-## 6. Verify And Start Using Orbit
+Optional, privileged extras:
+
+- `./bin/install-plymouth-theme` installs the Orbit boot theme with the
+  CachyOS logo and rebuilds the initramfs (`plymouth-set-default-theme -R`).
+- `./bin/configure-localsend-firewall` opens the LocalSend port in `ufw`
+  (CachyOS default) or `firewalld`.
+- Sunshine needs a machine-local profile copied from
+  `config/orbit/machine/sunshine-display.conf.example`.
+
+The display manager is left alone. Orbit is validated with SDDM launching the
+plain `hyprland.desktop` session. Noctalia Greeter (CachyOS repo package) is
+optional; the greeter background sync only runs when `greetd` is enabled.
+
+## 5. Verify And Start Using Orbit
 
 ```sh
 ./bootstrap/verify
@@ -119,20 +143,17 @@ requires privileged initramfs work and is not part of standard deployment.
 ```
 
 Log out and start a new Hyprland session after deployment so the authored
-configuration and newly installed plugins are loaded. No reboot is normally
-required. Live tests require an active non-root Hyprland session.
+configuration and newly installed plugins are loaded. Live tests require an
+active non-root Hyprland session. Keybindings are listed in
+[`keybinds.md`](keybinds.md).
 
 ## Rollback
 
-For an adoption manifest, use the exact manifest path printed by `--adopt`:
+- Takeover: `./bootstrap/takeover --restore ~/.local/state/orbit/takeover/<timestamp>`
+  removes Orbit's links, seeds, and empty directories, disables its user units,
+  and moves the backed-up files back. It refuses to overwrite anything that
+  changed after the takeover.
+- Adoption manifests: `./bootstrap/migrate --rollback "$HOME/.local/state/orbit/migrations/<timestamp>/manifest.json"`.
 
-```sh
-./bootstrap/migrate --rollback \
-  "$HOME/.local/state/orbit/migrations/<timestamp>/manifest.json"
-```
-
-Rollback refuses to remove a destination that has changed since adoption. To
-remove Orbit deployment links without deleting source or history, stop using
-the checkout, remove only symlinks that resolve into it, and restore any
-backups. Do not delete unrelated home-directory files. Reverting the Orbit Git
-checkout is separate from restoring machine-local state and generated outputs.
+Reverting the Orbit Git checkout is separate from restoring machine-local state
+and generated outputs.

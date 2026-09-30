@@ -23,15 +23,16 @@ HOME = Path(os.environ.get("HOME", "")).expanduser()
 STATE = Path(os.environ.get("XDG_STATE_HOME", HOME / ".local/state")) / "orbit/migrations"
 EXCLUDED_CONFIG = {"actions-for-nautilus", "obsidian", "zen"}
 GENERATED_CONFIG = {"hypr/hyprqt6engine.conf", "wezterm/wezterm.lua"}
+SEED_CONFIG = {"qt6ct/qt6ct.conf": "qt6ct/qt6ct.conf", "hypr/monitors.example.lua": "hypr/monitors.lua"}
+SUNSHINE_UNIT_DIRS = {"app-dev.lizardbyte.app.Sunshine.service.d", "sunshine.service.d"}
 EXCLUDED_BIN = {
     "configure-file-roller", "configure-localsend", "configure-localsend-firewall",
     "configure-mission-center", "configure-obsidian", "configure-protonup-qt",
     "configure-zen", "gpu-screen-recorder-control", "install-actions-for-nautilus",
-    "install-gpu-screen-recorder", "nautilus-copy-path", "nautilus-open-as-admin",
-    "orbit-daily-note", "orbit-game-run", "orbit-scratchpad", "show-localsend",
+    "install-gpu-screen-recorder", "install-plymouth-theme", "nautilus-copy-path",
+    "nautilus-open-as-admin", "orbit-daily-note", "orbit-game-run", "orbit-scratchpad",
+    "show-localsend",
 }
-EXCLUDED_UNITS = {"localsend.service", "orbit-game-session.service", "orbit-game-session.timer"}
-
 EXCLUDED_UNITS = {"localsend.service", "orbit-game-session.service", "orbit-game-session.timer"}
 
 
@@ -54,7 +55,7 @@ def authored_entries():
 
     for source in sorted((REPO / "config").rglob("*")):
         relative = source.relative_to(REPO / "config")
-        if not source.is_file() or "machine" in relative.parts or relative.parts[0] in EXCLUDED_CONFIG or relative.as_posix() in GENERATED_CONFIG or relative.as_posix() == "qt6ct/qt6ct.conf" or (relative.parts[0] == "hypr" and len(relative.parts) > 1 and relative.parts[1] in {"scripts", "shaders", "patches"}):
+        if not source.is_file() or "machine" in relative.parts or relative.parts[0] in EXCLUDED_CONFIG or relative.as_posix() in GENERATED_CONFIG or relative.as_posix() in SEED_CONFIG or (relative.parts[0] == "hypr" and len(relative.parts) > 1 and relative.parts[1] in {"scripts", "shaders", "patches"}):
             continue
         add(source, HOME / ".config" / relative)
     for root in (REPO / "config/hypr/scripts", REPO / "config/hypr/shaders", REPO / "config/hypr/patches"):
@@ -69,13 +70,14 @@ def authored_entries():
             add(source, HOME / ".local/lib" / source.name)
     unit_root = REPO / "systemd/user"
     for source in sorted(unit_root.rglob("*")):
-        if not source.is_file() or source.name in EXCLUDED_UNITS or (not sunshine_configured and ("app-dev.lizardbyte.app.Sunshine.service.d" in source.parts or source.name == "orbit-sunshine-display-watchdog.service")):
+        if not source.is_file() or source.name in EXCLUDED_UNITS or (not sunshine_configured and (SUNSHINE_UNIT_DIRS & set(source.parts) or source.name == "orbit-sunshine-display-watchdog.service")):
             continue
         add(source, HOME / ".config/systemd/user" / source.relative_to(unit_root))
 
-    # qt6ct is a copy-once seed, not a symlink-owned file. Sound assets are
-    # installed by bootstrap/deploy and are intentionally outside adoption.
-    add(REPO / "config/qt6ct/qt6ct.conf", HOME / ".config/qt6ct/qt6ct.conf", "seed")
+    # Seeds are copy-once files, not symlink-owned. Sound assets are installed
+    # by bootstrap/deploy and are intentionally outside adoption.
+    for relative, destination in SEED_CONFIG.items():
+        add(REPO / "config" / relative, HOME / ".config" / destination, "seed")
     return sorted(entries, key=lambda item: str(item["destination"]))
 
 

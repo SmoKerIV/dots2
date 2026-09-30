@@ -4,8 +4,8 @@ PartOf=hyprland-session.target
 After=hyprland-session.target
 
 [Service]
-ExecStart=/usr/bin/flatpak run org.localsend.localsend_app --hidden
-ExecStop=-/usr/bin/flatpak kill org.localsend.localsend_app
+# Native CachyOS/AUR package; the launcher helper falls back to the Flatpak.
+ExecStart=%h/.local/bin/show-localsend --daemon
 Restart=on-failure
 RestartSec=2
 

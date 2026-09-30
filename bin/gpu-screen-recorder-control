@@ -11,10 +11,23 @@ readonly recording_dir="${output_dir}/recordings"
 readonly resolve_dir="${output_dir}/resolve"
 readonly monitor_resolver="${HOME}/.local/bin/orbit-monitor"
 
+# Native extra/gpu-screen-recorder ships gpu-screen-recorder and gsr-cli; keep
+# the Flatpak as the fallback so an older machine keeps working.
+if command -v gpu-screen-recorder >/dev/null 2>&1 && command -v gsr-cli >/dev/null 2>&1; then
+    recorder_command=(gpu-screen-recorder)
+    cli_command=(gsr-cli)
+elif command -v flatpak >/dev/null 2>&1 && flatpak info "$app_id" >/dev/null 2>&1; then
+    recorder_command=(flatpak run --command=gpu-screen-recorder "$app_id")
+    cli_command=(flatpak run --command=gsr-cli "$app_id")
+else
+    printf 'GPU Screen Recorder is not installed. Run install-gpu-screen-recorder first.\n' >&2
+    exit 1
+fi
+
 gsr_cli() {
     local socket="$1"
     shift
-    flatpak run --command=gsr-cli "$app_id" -ipc "$socket" "$@"
+    "${cli_command[@]}" -ipc "$socket" "$@"
 }
 
 convert_for_resolve() {
@@ -61,7 +74,7 @@ start_replay() {
     replay_monitor="$("$monitor_resolver" instant-replay-monitor)" || exit 1
     mkdir -p "$replay_dir" "$recording_dir"
 
-    setsid flatpak run --command=gpu-screen-recorder "$app_id" \
+    setsid "${recorder_command[@]}" \
         -w "$replay_monitor" \
         -f 60 \
         -a default_output \
@@ -88,7 +101,7 @@ start_recording() {
     mkdir -p "$recording_dir"
     output_file="$recording_dir/Video_$(date +%Y-%m-%d_%H-%M-%S).mp4"
 
-    setsid flatpak run --command=gpu-screen-recorder "$app_id" \
+    setsid "${recorder_command[@]}" \
         -w "$monitor" \
         -f 60 \
         -a default_output \

@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Install Orbit's package dependencies on CachyOS / Arch Linux.
+#
+# usage: install-packages [--core] [--build] [--optional] [--aur] [--all] [--dry-run]
+#
+# Groups (default: --core --build --aur):
+#   --core      compositor, shell, portals, runtime tools and fonts
+#   --build     toolchain and headers for the pinned Hyprland plugins
+#   --optional  applications Orbit integrates with (repo packages only)
+#   --aur       AUR packages through paru (CachyOS ships paru)
+#   --all       every group
+#
+# Official repositories are used for everything that has a package there; the
+# CachyOS repository provides the AUR-derived applications (localsend, sunshine,
+# zen-browser-bin, chatgpt-desktop-bin) as normal pacman packages.
+
+core_packages=(
+    hyprland hyprpm hypridle hyprlock hyprpolkitagent hyprpicker hyprcursor hyprtoolkit
+    noctalia quickshell nwg-displays
+    xdg-desktop-portal xdg-desktop-portal-hyprland xdg-desktop-portal-gtk polkit
+    python python-pyudev python-evdev python-gobject jq socat util-linux shadow procps-ng dbus
+    grim slurp wl-clipboard zenity libcanberra alsa-utils
+    qt6ct kitty wezterm nautilus gnome-calculator fastfetch micro
+    ttf-jetbrains-mono noto-fonts noto-fonts-emoji adw-gtk-theme
+)
+
+build_packages=(
+    base-devel git patch pkgconf cmake
+    pixman libdrm pango libinput systemd-libs wayland libxkbcommon lua cairo libpng mesa libglvnd
+)
+
+optional_packages=(
+    mission-center gpu-screen-recorder gpu-screen-recorder-ui
+    syncthing gamemode steam
+    obsidian zed nautilus-python plymouth
+    # CachyOS repository (AUR-derived)
+    localsend sunshine zen-browser-bin chatgpt-desktop-bin
+)
+
+aur_packages=(
+    hyprqt6engine
+    kora-icon-theme
+)
+
+groups=()
+dry_run=false
+for argument in "$@"; do
+    case "$argument" in
+        --core|--build|--optional|--aur) groups+=("${argument#--}") ;;
+        --all) groups+=(core build optional aur) ;;
+        --dry-run) dry_run=true ;;
+        -h|--help) sed -n '3,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *) printf 'usage: %s [--core] [--build] [--optional] [--aur] [--all] [--dry-run]\n' "$0" >&2; exit 2 ;;
+    esac
+done
+(( ${#groups[@]} > 0 )) || groups=(core build aur)
+
+command -v pacman >/dev/null 2>&1 || {
+    printf 'pacman was not found; this installer is for CachyOS / Arch Linux.\n' >&2
+    exit 1
+}
+
+pacman_targets=()
+aur_targets=()
+for group in "${groups[@]}"; do
+    case "$group" in
+        core) pacman_targets+=("${core_packages[@]}") ;;
+        build) pacman_targets+=("${build_packages[@]}") ;;
+        optional) pacman_targets+=("${optional_packages[@]}") ;;
+        aur) aur_targets+=("${aur_packages[@]}") ;;
+    esac
+done
+
+# Packages already provided by another installed package (e.g. a *-git or
+# *-bin variant) are skipped rather than forcing a conflict.
+filter_installed() {
+    local package
+    for package in "$@"; do
+        pacman -Qq "$package" >/dev/null 2>&1 || printf '%s\n' "$package"
+    done
+}
+
+if (( ${#pacman_targets[@]} > 0 )); then
+    mapfile -t pacman_missing < <(filter_installed "${pacman_targets[@]}")
+    if (( ${#pacman_missing[@]} > 0 )); then
+        printf 'pacman: %s\n' "${pacman_missing[*]}"
+        if [[ "$dry_run" == false ]]; then
+            sudo pacman -S --needed "${pacman_missing[@]}"
+        fi
+    else
+        printf 'pacman: all requested packages are installed\n'
+    fi
+fi
+
+if (( ${#aur_targets[@]} > 0 )); then
+    mapfile -t aur_missing < <(filter_installed "${aur_targets[@]}")
+    if (( ${#aur_missing[@]} > 0 )); then
+        printf 'aur: %s\n' "${aur_missing[*]}"
+        if [[ "$dry_run" == false ]]; then
+            if command -v paru >/dev/null 2>&1; then
+                paru -S --needed "${aur_missing[@]}"
+            elif command -v yay >/dev/null 2>&1; then
+                yay -S --needed "${aur_missing[@]}"
+            else
+                printf 'No AUR helper found (paru/yay). Install these by hand: %s\n' "${aur_missing[*]}" >&2
+                exit 1
+            fi
+        fi
+    else
+        printf 'aur: all requested packages are installed\n'
+    fi
+fi
+
+if [[ "$dry_run" == false ]] && ! id -nG "$USER" | tr ' ' '\n' | grep -qx input; then
+    # orbit-input-state reads evdev devices through `sg input`; membership takes
+    # effect at the next login.
+    printf 'Adding %s to the input group (needed by workspace-alt-tab-input.service)\n' "$USER"
+    sudo usermod -aG input "$USER"
+fi

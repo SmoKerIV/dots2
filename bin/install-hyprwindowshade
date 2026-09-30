@@ -9,7 +9,30 @@ patch_file="$HOME/.config/hypr/patches/hyprwindowshade-per-window-effects.patch"
 
 command -v git >/dev/null || { printf '%s\n' 'error: git is required' >&2; exit 1; }
 command -v g++ >/dev/null || { printf '%s\n' 'error: g++ is required' >&2; exit 1; }
-command -v hyprpm >/dev/null || { printf '%s\n' 'error: hyprpm is required' >&2; exit 1; }
+command -v pkg-config >/dev/null || { printf '%s\n' 'error: pkg-config is required' >&2; exit 1; }
+
+# Arch's hyprland package installs matching headers and hyprland.pc, so the
+# compositor ABI is always the installed one. hyprpm's header cache is only a
+# fallback for distributions that do not ship them.
+if pkg-config --exists hyprland; then
+    mapfile -t header_flags < <(pkg-config --cflags-only-I hyprland pixman-1 libdrm pangocairo | tr ' ' '\n' | sed '/^$/d')
+elif [[ -d "/var/cache/hyprpm/$USER/headersRoot/include" ]]; then
+    headers="/var/cache/hyprpm/$USER/headersRoot"
+    header_flags=(
+        -I"$headers/include"
+        -I"$headers/include/hyprland"
+        -I"$headers/include/hyprland/src"
+        -I"$headers/include/hyprland/protocols"
+        -I/usr/include/cairo
+        -I/usr/include/freetype2
+        -I/usr/include/libpng16
+        -I/usr/include/pixman-1
+        -I/usr/include/libdrm
+    )
+else
+    printf '%s\n' 'error: Hyprland headers are unavailable (install the hyprland package or run hyprpm update)' >&2
+    exit 1
+fi
 
 if [[ ! -d "$source_dir/.git" ]]; then
     mkdir -p "${source_dir%/*}"
@@ -21,22 +44,13 @@ git -C "$source_dir" checkout --quiet --detach "$repo_commit"
 git -C "$source_dir" reset --quiet --hard "$repo_commit"
 git -C "$source_dir" apply "$patch_file"
 
-headers="/var/cache/hyprpm/$USER/headersRoot"
 plugin_dir="$HOME/.local/share/hyprland/plugins"
 plugin_path="$plugin_dir/HyprWindowShade.so"
 mkdir -p "$plugin_dir"
 (
     cd "$source_dir"
     g++ -shared -fPIC -O3 -std=c++23 *.cpp -o HyprWindowShade.so \
-        -I"$headers/include" \
-        -I"$headers/include/hyprland" \
-        -I"$headers/include/hyprland/src" \
-        -I"$headers/include/hyprland/protocols" \
-        -I/usr/include/cairo \
-        -I/usr/include/freetype2 \
-        -I/usr/include/libpng16 \
-        -I/usr/include/pixman-1 \
-        -I/usr/include/libdrm \
+        "${header_flags[@]}" \
         -lGLESv2 -lEGL -lGL
     install -m 0755 HyprWindowShade.so "$plugin_path"
 )

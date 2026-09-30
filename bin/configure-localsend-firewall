@@ -4,21 +4,29 @@ set -euo pipefail
 readonly zone='public'
 readonly port='53317'
 
-if ! command -v firewall-cmd >/dev/null 2>&1; then
-    printf 'firewall-cmd was not found. Install firewalld first.\n' >&2
-    exit 1
-fi
-
 sudo -v
 
-if ! firewall-cmd --state >/dev/null 2>&1; then
-    printf 'Starting and enabling firewalld...\n'
-    sudo systemctl enable --now firewalld.service
+if command -v ufw >/dev/null 2>&1; then
+    # CachyOS ships ufw by default.
+    if ! sudo ufw status | grep -q '^Status: active'; then
+        printf 'Enabling ufw...\n'
+        sudo ufw --force enable
+    fi
+    sudo ufw allow "$port/tcp" comment 'LocalSend'
+    sudo ufw allow "$port/udp" comment 'LocalSend'
+    printf 'LocalSend firewall rules (ufw):\n'
+    sudo ufw status | grep "$port"
+elif command -v firewall-cmd >/dev/null 2>&1; then
+    if ! firewall-cmd --state >/dev/null 2>&1; then
+        printf 'Starting and enabling firewalld...\n'
+        sudo systemctl enable --now firewalld.service
+    fi
+    sudo firewall-cmd --permanent --zone="$zone" --add-port="$port/tcp"
+    sudo firewall-cmd --permanent --zone="$zone" --add-port="$port/udp"
+    sudo firewall-cmd --reload
+    printf 'LocalSend firewall rules in zone %s:\n' "$zone"
+    sudo firewall-cmd --zone="$zone" --list-ports
+else
+    printf 'Neither ufw nor firewall-cmd was found; no firewall rule is needed unless a firewall is installed.\n' >&2
+    exit 1
 fi
-
-sudo firewall-cmd --permanent --zone="$zone" --add-port="$port/tcp"
-sudo firewall-cmd --permanent --zone="$zone" --add-port="$port/udp"
-sudo firewall-cmd --reload
-
-printf 'LocalSend firewall rules in zone %s:\n' "$zone"
-sudo firewall-cmd --zone="$zone" --list-ports
